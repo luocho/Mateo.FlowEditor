@@ -1,0 +1,280 @@
+﻿<Window x:Class="FlowEditor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:FlowEditor.ViewModels"
+        Title="{Binding Title}" Width="1280" Height="800"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenCommand}"/>
+        <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveCommand}"/>
+        <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
+        <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
+        <KeyBinding Key="A" Modifiers="Ctrl" Command="{Binding SelectAllCommand}"/>
+        <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding LoadDllCommand}"/>
+        <KeyBinding Key="Delete" Command="{Binding DeleteNodeCommand}"/>
+    </Window.InputBindings>
+
+    <DockPanel>
+        <!-- 菜单栏 -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="文件(_F)">
+                <MenuItem Header="打开(_O)..." Command="{Binding OpenCommand}" InputGestureText="Ctrl+O"/>
+                <MenuItem Header="保存(_S)" Command="{Binding SaveCommand}" InputGestureText="Ctrl+S"/>
+                <MenuItem Header="另存为(_A)..." Command="{Binding SaveAsCommand}"/>
+                <Separator/>
+                <MenuItem Header="退出(_X)" Command="{Binding ExitCommand}"/>
+            </MenuItem>
+            <MenuItem Header="编辑(_E)">
+                <MenuItem Header="{Binding Editor.UndoName, StringFormat=撤销(_U) {0}, FallbackValue=撤销(_U)}"
+                          Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z"/>
+                <MenuItem Header="{Binding Editor.RedoName, StringFormat=重做(_R) {0}, FallbackValue=重做(_R)}"
+                          Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y"/>
+                <Separator/>
+                <MenuItem Header="全选(_A)" Command="{Binding SelectAllCommand}" InputGestureText="Ctrl+A"/>
+                <MenuItem Header="删除选中节点(_D)" Command="{Binding DeleteNodeCommand}" InputGestureText="Delete"/>
+            </MenuItem>
+            <MenuItem Header="流程(_P)">
+                <MenuItem Header="新建流程(_N)" Command="{Binding AddFlowCommand}"/>
+                <MenuItem Header="删除当前流程(_D)" Command="{Binding RemoveFlowCommand}"/>
+            </MenuItem>
+            <MenuItem Header="工具(_T)">
+                <MenuItem Header="加载任务 DLL(_L)..." Command="{Binding LoadDllCommand}" InputGestureText="Ctrl+D"/>
+                <Separator/>
+                <MenuItem Header="校验配置(_V)" Command="{Binding ValidateCommand}"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- 状态栏：左=统计信息，右=缩放控制 -->
+        <Border DockPanel.Dock="Bottom" Background="#FFF2F3F5"
+                BorderBrush="#FFDCDFE6" BorderThickness="0,1,0,0" Padding="10,3">
+            <Grid>
+                <TextBlock VerticalAlignment="Center" Foreground="#FF606266"
+                           Text="{Binding Editor.StatusText}"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="缩放" VerticalAlignment="Center" Foreground="#FF909399"/>
+                    <Button Content="−" Width="24" Margin="6,0,0,0" Click="ZoomOut_Click"/>
+                    <Slider Width="130" Margin="6,0" VerticalAlignment="Center"
+                            Minimum="0.25" Maximum="2.5"
+                            Value="{Binding Editor.Zoom, Mode=TwoWay}"/>
+                    <Button Content="＋" Width="24" Click="ZoomIn_Click"/>
+                    <Button Content="100%" Margin="6,0,0,0" Padding="6,0" Click="ZoomReset_Click"/>
+                    <TextBlock Width="46" Margin="6,0,0,0" VerticalAlignment="Center"
+                               Text="{Binding Editor.Zoom, StringFormat=P0}"/>
+                    <TextBlock Text="（Ctrl+滚轮）" VerticalAlignment="Center" Foreground="#FFC0C4CC" FontSize="11"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230"/>
+                <ColumnDefinition Width="4"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧：Flow 列表 -->
+            <DockPanel Grid.Column="0" Background="#FFF2F3F5">
+                <Border DockPanel.Dock="Top" Padding="10,8" Background="#FFE4E7ED">
+                    <TextBlock Text="Flow 列表" FontWeight="Bold"/>
+                </Border>
+                <ListBox ItemsSource="{Binding Flows}"
+                         SelectedItem="{Binding SelectedFlow}"
+                         BorderThickness="0" Background="Transparent" Padding="4">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="2">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding Id}" FontSize="10" Foreground="#FF909399"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#FFDCDFE6"/>
+
+            <!-- 右侧：画板 -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 滚动区域 -->
+                <ScrollViewer x:Name="CanvasScroll" Grid.Row="0"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="CanvasScroll_PreviewMouseWheel">
+
+                    <Grid x:Name="EditorArea" ClipToBounds="True"
+                          Width="{Binding Editor.CanvasWidth}"
+                          Height="{Binding Editor.CanvasHeight}"
+                          MouseLeftButtonDown="EditorArea_MouseLeftButtonDown"
+                          MouseMove="EditorArea_MouseMove"
+                          MouseLeftButtonUp="EditorArea_MouseLeftButtonUp">
+                        <!-- 点阵背景 -->
+                        <Grid.Background>
+                            <DrawingBrush TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
+                                <DrawingBrush.Drawing>
+                                    <GeometryDrawing Brush="#FFD8DCE3">
+                                        <GeometryDrawing.Geometry>
+                                            <EllipseGeometry Center="10,10" RadiusX="1.1" RadiusY="1.1"/>
+                                        </GeometryDrawing.Geometry>
+                                    </GeometryDrawing>
+                                </DrawingBrush.Drawing>
+                            </DrawingBrush>
+                        </Grid.Background>
+                        <!-- 缩放变换 -->
+                        <Grid.LayoutTransform>
+                            <ScaleTransform ScaleX="{Binding Editor.Zoom}" ScaleY="{Binding Editor.Zoom}"/>
+                        </Grid.LayoutTransform>
+                        <Grid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="在此处添加节点" Click="AddNode_Click"/>
+                            </ContextMenu>
+                        </Grid.ContextMenu>
+
+                        <!-- 连线层 -->
+                        <ItemsControl ItemsSource="{Binding Editor.Connections}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Canvas IsItemsHost="True"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:ConnectionViewModel}">
+                                    <Grid>
+                                        <Path Stroke="Transparent" StrokeThickness="14" Data="{Binding Geometry}">
+                                            <Path.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="删除连线" Click="DeleteConnection_Click"/>
+                                                </ContextMenu>
+                                            </Path.ContextMenu>
+                                        </Path>
+                                        <Path Stroke="#FF909399" StrokeThickness="2"
+                                              Data="{Binding Geometry}" IsHitTestVisible="False"/>
+                                        <Canvas>
+                                            <Border Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}"
+                                                    Background="#E6FFFFFF" CornerRadius="3" Padding="1">
+                                                <ComboBox Width="96" IsEditable="True" FontSize="11"
+                                                          ItemsSource="{Binding DataContext.Editor.ConditionOptions,
+                                                              RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          Text="{Binding Condition, UpdateSourceTrigger=LostFocus}"
+                                                          ToolTip="连线条件"/>
+                                            </Border>
+                                        </Canvas>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- 节点层 -->
+                        <ItemsControl ItemsSource="{Binding Editor.Nodes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Canvas IsItemsHost="True"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="Canvas.Left" Value="{Binding X, Mode=OneWay}"/>
+                                    <Setter Property="Canvas.Top"  Value="{Binding Y, Mode=OneWay}"/>
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:NodeViewModel}">
+                                    <Border Width="180" Background="White" CornerRadius="6"
+                                            BorderThickness="1.5"
+                                            PreviewMouseLeftButtonDown="Node_MouseLeftButtonDown"
+                                            SizeChanged="Node_SizeChanged">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="BorderBrush" Value="#FFC0C4CC"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#FF409EFF"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.25"/>
+                                        </Border.Effect>
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="删除节点" Click="DeleteNodeMenu_Click"/>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Border Grid.Row="0" Background="{Binding HeaderBrush}"
+                                                    CornerRadius="6,6,0,0" Padding="8,3">
+                                                <TextBlock Text="{Binding NodeType}" Foreground="White"
+                                                           FontSize="11" FontWeight="SemiBold"/>
+                                            </Border>
+                                            <StackPanel Grid.Row="1" Margin="8,6,8,2">
+                                                <TextBlock Text="NodeName" FontSize="10" Foreground="#FF909399"/>
+                                                <TextBox Text="{Binding NodeName, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                        <StackPanel Grid.Row="2" Margin="8,2,8,8">
+                                            <TextBlock Text="ExeName" FontSize="10" Foreground="#FF909399"/>
+                                            <ComboBox IsEditable="True"
+                                                      Text="{Binding ExeName, UpdateSourceTrigger=PropertyChanged}"
+                                                      ItemsSource="{Binding DataContext.TaskTypes,
+                                                          RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      ToolTip="从已加载 DLL 中选择，也可直接手写"/>
+                                        </StackPanel>
+                                            <Ellipse x:Name="InPort" Grid.RowSpan="3" Width="11" Height="11"
+                                                     Fill="#FF67C23A" Stroke="White" StrokeThickness="1.5"
+                                                     HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                     Margin="0,-6,0,0" Panel.ZIndex="1" Cursor="Cross"
+                                                     Visibility="{Binding InPortVisibility}" ToolTip="输入端口"/>
+                                            <Ellipse x:Name="OutPort" Grid.RowSpan="3" Width="11" Height="11"
+                                                     Fill="#FF409EFF" Stroke="White" StrokeThickness="1.5"
+                                                     HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                                     Margin="0,0,0,-6" Panel.ZIndex="1" Cursor="Cross"
+                                                     Visibility="{Binding OutPortVisibility}" ToolTip="按住拖出连线"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- 框选/拖线覆盖层：Canvas 子元素才能用 Canvas.Left/Top 精确定位 -->
+                        <Canvas IsHitTestVisible="False">
+                            <Rectangle x:Name="SelectionRect" Visibility="Collapsed"
+                                       Stroke="#FF409EFF" StrokeThickness="1" StrokeDashArray="4 2"
+                                       Fill="#1A409EFF"/>
+                            <Line x:Name="TempLine" Stroke="#FF409EFF" StrokeThickness="2"
+                                  StrokeDashArray="4 3" Visibility="Collapsed"/>
+                        </Canvas>
+                    </Grid>
+                </ScrollViewer>
+
+                <!-- 底部属性栏 -->
+                <Border Grid.Row="1" Background="White" BorderBrush="#FFDCDFE6"
+                        BorderThickness="0,1,0,0" Padding="10,6">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                DataContext="{Binding Editor.SelectedNode}">
+                        <TextBlock Text="选中节点：" VerticalAlignment="Center" Foreground="#FF909399"/>
+                        <TextBlock Text="Id" VerticalAlignment="Center" Margin="6,0,2,0"/>
+                        <TextBox Text="{Binding Id}" IsReadOnly="True" Width="110" Margin="0,0,10,0"/>
+                        <TextBlock Text="Type" VerticalAlignment="Center" Margin="0,0,2,0"/>
+                        <ComboBox Width="80" IsEditable="True" Margin="0,0,10,0"
+                                  ItemsSource="{Binding DataContext.Editor.NodeTypeOptions,
+                                      RelativeSource={RelativeSource AncestorType=Window}}"
+                                  Text="{Binding NodeType}"/>
+                        <TextBlock Text="InputParameters" VerticalAlignment="Center" Margin="0,0,2,0"/>
+                        <TextBox Width="340" Text="{Binding InputParametersText, UpdateSourceTrigger=LostFocus}"
+                                 ToolTip="留空保存为 &quot;&quot;；填写 JSON 对象则原样保存"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>
