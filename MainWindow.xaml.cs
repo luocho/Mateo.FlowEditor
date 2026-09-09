@@ -21,6 +21,7 @@ namespace FlowEditor
         private Dictionary<NodeViewModel, Point> _dragStarts = new();
         private Point _rubberStart;
         private bool _rubberAdditive;
+        private Point _contextMenuPosition;
 
         public MainWindow()
         {
@@ -61,6 +62,7 @@ namespace FlowEditor
 
             var src = e.OriginalSource as DependencyObject;
             if (FindAncestor<TextBoxBase>(src) != null || FindAncestor<ComboBox>(src) != null
+                || FindAncestor<ComboBoxItem>(src) != null
                 || FindAncestor<ButtonBase>(src) != null)
                 return; // 在编辑文本，不进入拖拽
 
@@ -208,6 +210,27 @@ namespace FlowEditor
         private void ZoomReset_Click(object sender, RoutedEventArgs e)
         { if (_vm.Editor != null) _vm.Editor.Zoom = 1.0; }
 
+        private void EditorArea_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+            => _contextMenuPosition = Mouse.GetPosition(EditorArea);
+
+        private void NodeTypeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (sender is ComboBox { DataContext: NodeViewModel node, SelectedItem: string nodeType })
+                node.NodeType = nodeType;
+        }
+
+        private void SubFlowSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+            => ApplySubFlowSelection(sender);
+
+        private void SubFlowSelector_DropDownClosed(object? sender, EventArgs e)
+            => ApplySubFlowSelection(sender);
+
+        private static void ApplySubFlowSelection(object? sender)
+        {
+            if (sender is ComboBox { DataContext: NodeViewModel node, SelectedItem: string flowId })
+                node.ExeName = flowId;
+        }
+
         // ===== 其余（与上一版相同） =====
         private void Node_SizeChanged(object sender, SizeChangedEventArgs e)
         {
@@ -218,14 +241,22 @@ namespace FlowEditor
             }
         }
 
-        private void AddNode_Click(object sender, RoutedEventArgs e)
+        private void AddFuncNode_Click(object sender, RoutedEventArgs e) => AddNode("Func");
+
+        private void AddSubFlowNode_Click(object sender, RoutedEventArgs e) => AddNode("SubFlow");
+
+        private void AddNode(string nodeType)
         {
             if (_vm.Editor == null)
             {
                 MessageBox.Show("请先在左侧打开或新建一个 Flow。", "提示");
                 return;
             }
-            _vm.Editor.AddNode(Mouse.GetPosition(EditorArea));
+
+            var position = _contextMenuPosition;
+            if (position.X < 0 || position.Y < 0 || position.X > EditorArea.ActualWidth || position.Y > EditorArea.ActualHeight)
+                position = new Point(CanvasScroll.HorizontalOffset + 160, CanvasScroll.VerticalOffset + 120);
+            _vm.Editor.AddNode(position, nodeType);
         }
 
         private void DeleteNodeMenu_Click(object sender, RoutedEventArgs e)

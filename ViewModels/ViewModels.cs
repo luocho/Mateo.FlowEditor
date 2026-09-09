@@ -6,7 +6,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -58,9 +57,17 @@ namespace FlowEditor.ViewModels
             get => _nodeType;
             set
             {
-                if (Set(ref _nodeType, value))
+                var normalized = string.Equals(value, "Flow", StringComparison.OrdinalIgnoreCase)
+                    ? "SubFlow"
+                    : value;
+                if (Set(ref _nodeType, normalized))
                 {
+                    if (!CanSelectExeName) ExeName = "";
                     OnPropertyChanged(nameof(HeaderBrush));
+                    OnPropertyChanged(nameof(BodyBrush));
+                    OnPropertyChanged(nameof(ExeNameLabel));
+                    OnPropertyChanged(nameof(CanSelectExeName));
+                    OnPropertyChanged(nameof(CanChangeNodeKind));
                     OnPropertyChanged(nameof(InPortVisibility));
                     OnPropertyChanged(nameof(OutPortVisibility));
                 }
@@ -85,9 +92,19 @@ namespace FlowEditor.ViewModels
         {
             "Start" => new SolidColorBrush(Color.FromRgb(0x67, 0xC2, 0x3A)),
             "End" => new SolidColorBrush(Color.FromRgb(0x90, 0x93, 0x99)),
-            "Flow" => new SolidColorBrush(Color.FromRgb(0xE6, 0xA2, 0x3C)),
+            "SubFlow" => new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED)),
             _ => new SolidColorBrush(Color.FromRgb(0x40, 0x9E, 0xFF)),
         };
+        public Brush BodyBrush => NodeType switch
+        {
+            "Start" => new SolidColorBrush(Color.FromRgb(0xF0, 0xF9, 0xEB)),
+            "End" => new SolidColorBrush(Color.FromRgb(0xF4, 0xF4, 0xF5)),
+            "SubFlow" => new SolidColorBrush(Color.FromRgb(0xF5, 0xF0, 0xFF)),
+            _ => new SolidColorBrush(Color.FromRgb(0xEC, 0xF5, 0xFF)),
+        };
+        public string ExeNameLabel => NodeType == "SubFlow" ? "目标 Flow" : "ExeName";
+        public bool CanSelectExeName => NodeType is not ("Start" or "End");
+        public bool CanChangeNodeKind => NodeType is "Func" or "SubFlow";
         public Visibility InPortVisibility => NodeType == "Start" ? Visibility.Collapsed : Visibility.Visible;
         public Visibility OutPortVisibility => NodeType == "End" ? Visibility.Collapsed : Visibility.Visible;
 
@@ -107,7 +124,7 @@ namespace FlowEditor.ViewModels
         {
             Id = Id,
             NodeName = NodeName,
-            ExeName = ExeName,
+            ExeName = CanSelectExeName ? ExeName : "",
             NodeType = NodeType,
             InputParameters = FromText(InputParametersText),
             X = X,
@@ -213,7 +230,7 @@ namespace FlowEditor.ViewModels
         public ObservableCollection<ConnectionViewModel> Connections { get; } = new();
 
         public IReadOnlyList<string> ConditionOptions { get; } = new[] { "", "Yes", "No", "Ignored", "Completed" };
-        public IReadOnlyList<string> NodeTypeOptions { get; } = new[] { "Start", "End", "Func", "Flow" };
+        public IReadOnlyList<string> NodeTypeOptions { get; } = new[] { "Func", "SubFlow" };
 
         // ----- 缩放 -----
         public const double MinZoom = 0.25, MaxZoom = 2.5;
@@ -361,15 +378,17 @@ namespace FlowEditor.ViewModels
         }
 
         // ================= 编辑操作（记录撤销） =================
-        public NodeViewModel AddNode(Point pos)
+        public NodeViewModel AddNode(Point pos, string nodeType = "Func")
         {
+            nodeType = nodeType == "SubFlow" ? "SubFlow" : "Func";
+            var prefix = nodeType == "SubFlow" ? "SubFlow" : "Func";
             int i = 1; string id;
-            do { id = $"Node_{i++}"; } while (Nodes.Any(n => n.Id == id));
+            do { id = $"{prefix}_{i++}"; } while (Nodes.Any(n => n.Id == id));
             var node = new NodeViewModel
             {
                 Id = id,
-                NodeName = "NewNode",
-                NodeType = "Func",
+                NodeName = nodeType == "SubFlow" ? "NewSubFlow" : "NewFunc",
+                NodeType = nodeType,
                 X = Math.Max(0, pos.X - 90),
                 Y = Math.Max(0, pos.Y - 30)
             };
@@ -572,6 +591,7 @@ namespace FlowEditor.ViewModels
 
         // ----- 任务 DLL（供 ExeName 下拉选择 / 手写） -----
         public ObservableCollection<string> TaskTypes { get; } = new();
+        public ObservableCollection<string> FlowIds { get; } = new();
 
         private string? _taskDllPath;
         public string? TaskDllPath
@@ -632,6 +652,7 @@ namespace FlowEditor.ViewModels
                 Editor = null; _selectedFlow = null;
                 Flows.Clear();
                 foreach (var f in file.Flows) Flows.Add(f);
+                RefreshFlowIds();
                 FilePath = dlg.FileName;
                 SelectedFlow = Flows.FirstOrDefault();
             }
@@ -653,7 +674,8 @@ namespace FlowEditor.ViewModels
 
             try
             {
-                var names = LoadITaskTypeNames(dlg.FileName);
+                using var loader = new TaskDllLoader(dlg.FileName);
+                var names = loader.GetITaskTypeNames(dlg.FileName);
                 TaskTypes.Clear();
                 foreach (var n in names) TaskTypes.Add(n);
                 TaskDllPath = dlg.FileName;
@@ -666,29 +688,6 @@ namespace FlowEditor.ViewModels
                 MessageBox.Show($"加载 DLL 失败：{ex.Message}", "错误",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
-        }
-
-        /// <summary>反射加载 DLL，返回所有实现 ITask 接口（名字不区分大小写）的类全名</summary>
-        private static List<string> LoadITaskTypeNames(string dllPath)
-        {
-            var asm = Assembly.LoadFrom(dllPath);
-            Type[] types;
-            try
-            {
-                types = asm.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = ex.Types.Where(t => t != null).Cast<Type>().ToArray();
-            }
-
-            return types
-                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible && !t.IsGenericTypeDefinition)
-                .Where(t => t.GetInterfaces().Any(
-                    i => string.Equals(i.Name, "ITask", StringComparison.OrdinalIgnoreCase)))
-                .Select(t => t.FullName ?? t.Name)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .ToList();
         }
 
         private void Save() { if (FilePath == null) SaveAs(); else WriteFile(FilePath); }
@@ -771,6 +770,7 @@ namespace FlowEditor.ViewModels
             f.Nodes.Add(new NodeDef { Id = "start", NodeName = "Start", NodeType = "Start", InputParameters = "" });
             f.Nodes.Add(new NodeDef { Id = "end", NodeName = "End", NodeType = "End", InputParameters = "" });
             Flows.Add(f);
+            RefreshFlowIds();
             SelectedFlow = f;
         }
 
@@ -781,7 +781,15 @@ namespace FlowEditor.ViewModels
                     MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             int idx = Flows.IndexOf(SelectedFlow);
             Flows.Remove(SelectedFlow);
+            RefreshFlowIds();
             SelectedFlow = Flows.Count > 0 ? Flows[Math.Min(idx, Flows.Count - 1)] : null;
+        }
+
+        private void RefreshFlowIds()
+        {
+            FlowIds.Clear();
+            foreach (var id in Flows.Select(f => f.Id).Where(id => !string.IsNullOrWhiteSpace(id)))
+                FlowIds.Add(id);
         }
     }
 }
