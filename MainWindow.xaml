@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:FlowEditor.ViewModels"
+        xmlns:framework="clr-namespace:Framework"
         Title="{Binding Title}" Width="1280" Height="800"
         WindowStartupLocation="CenterScreen">
 
@@ -68,9 +69,11 @@
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="230"/>
+                <ColumnDefinition Width="210"/>
                 <ColumnDefinition Width="4"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="4"/>
+                <ColumnDefinition Width="330"/>
             </Grid.ColumnDefinitions>
 
             <!-- 左侧：Flow 列表 -->
@@ -81,12 +84,26 @@
                 <ListBox ItemsSource="{Binding Flows}"
                          SelectedItem="{Binding SelectedFlow}"
                          BorderThickness="0" Background="Transparent" Padding="4">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Margin="2">
-                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding Id}" FontSize="10" Foreground="#FF909399"/>
-                            </StackPanel>
+                            <Border Background="Transparent" Padding="2">
+                                <Border.ContextMenu>
+                                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext,
+                                        RelativeSource={RelativeSource Self}}">
+                                        <MenuItem Header="修改流程名称" Click="RenameFlowMenu_Click"/>
+                                        <MenuItem Header="删除流程" Click="DeleteFlowMenu_Click"/>
+                                    </ContextMenu>
+                                </Border.ContextMenu>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Id}" FontSize="10" Foreground="#FF909399"/>
+                                </StackPanel>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
@@ -94,15 +111,10 @@
 
             <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#FFDCDFE6"/>
 
-            <!-- 右侧：画板 -->
+            <!-- 中间：画板 -->
             <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-
                 <!-- 滚动区域 -->
-                <ScrollViewer x:Name="CanvasScroll" Grid.Row="0"
+                <ScrollViewer x:Name="CanvasScroll"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               PreviewMouseWheel="CanvasScroll_PreviewMouseWheel">
@@ -120,7 +132,7 @@
                                 <DrawingBrush.Drawing>
                                     <GeometryDrawing Brush="#FFD8DCE3">
                                         <GeometryDrawing.Geometry>
-                                            <EllipseGeometry Center="10,10" RadiusX="1.1" RadiusY="1.1"/>
+                                            <EllipseGeometry Center="10,10" RadiusX="1.1" RadiusY="0.8"/>
                                         </GeometryDrawing.Geometry>
                                     </GeometryDrawing>
                                 </DrawingBrush.Drawing>
@@ -132,8 +144,8 @@
                         </Grid.LayoutTransform>
                         <Grid.ContextMenu>
                             <ContextMenu>
-                                <MenuItem Header="添加 Func 节点" Click="AddFuncNode_Click"/>
-                                <MenuItem Header="添加 SubFlow 节点" Click="AddSubFlowNode_Click"/>
+                                <MenuItem Header="添加 ACTION 节点" Click="AddActionNode_Click"/>
+                                <MenuItem Header="添加 FLOW 节点" Click="AddFlowStepNode_Click"/>
                             </ContextMenu>
                         </Grid.ContextMenu>
 
@@ -146,7 +158,7 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:ConnectionViewModel}">
-                                    <Grid>
+                                    <Grid PreviewMouseLeftButtonDown="Connection_MouseLeftButtonDown" Cursor="Hand">
                                         <Path Stroke="Transparent" StrokeThickness="14" Data="{Binding Geometry}">
                                             <Path.ContextMenu>
                                                 <ContextMenu>
@@ -154,16 +166,25 @@
                                                 </ContextMenu>
                                             </Path.ContextMenu>
                                         </Path>
-                                        <Path Stroke="#FF909399" StrokeThickness="2"
-                                              Data="{Binding Geometry}" IsHitTestVisible="False"/>
+                                        <Path StrokeThickness="2" Data="{Binding Geometry}" IsHitTestVisible="False">
+                                            <Path.Style>
+                                                <Style TargetType="Path">
+                                                    <Setter Property="Stroke" Value="#FF909399"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter Property="Stroke" Value="#FF409EFF"/>
+                                                            <Setter Property="StrokeThickness" Value="3"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Path.Style>
+                                        </Path>
                                         <Canvas>
                                             <Border Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}"
-                                                    Background="#E6FFFFFF" CornerRadius="3" Padding="1">
-                                                <ComboBox Width="96" IsEditable="True" FontSize="11"
-                                                          ItemsSource="{Binding DataContext.Editor.ConditionOptions,
-                                                              RelativeSource={RelativeSource AncestorType=Window}}"
-                                                          Text="{Binding Condition, UpdateSourceTrigger=LostFocus}"
-                                                          ToolTip="连线条件"/>
+                                                    Background="#E6FFFFFF" CornerRadius="3" Padding="5,2">
+                                                <TextBlock Width="86" Text="{Binding Conditions}"
+                                                           TextAlignment="Center" FontSize="11"
+                                                           TextTrimming="CharacterEllipsis"/>
                                             </Border>
                                         </Canvas>
                                     </Grid>
@@ -186,7 +207,7 @@
                             </ItemsControl.ItemContainerStyle>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:NodeViewModel}">
-                                    <Border Width="196" Background="{Binding BodyBrush}" CornerRadius="7"
+                                    <Border Width="180" Background="{Binding BodyBrush}" CornerRadius="7"
                                             BorderThickness="1.5"
                                             PreviewMouseLeftButtonDown="Node_MouseLeftButtonDown"
                                             SizeChanged="Node_SizeChanged">
@@ -205,8 +226,8 @@
                                         </Border.Effect>
                                         <Border.ContextMenu>
                                             <ContextMenu>
-                                                <MenuItem Header="添加 Func 节点" Click="AddFuncNode_Click"/>
-                                                <MenuItem Header="添加 SubFlow 节点" Click="AddSubFlowNode_Click"/>
+                                                <MenuItem Header="添加 ACTION 节点" Click="AddActionNode_Click"/>
+                                                <MenuItem Header="添加 FLOW 节点" Click="AddFlowStepNode_Click"/>
                                                 <Separator/>
                                                 <MenuItem Header="删除节点" Click="DeleteNodeMenu_Click"/>
                                             </ContextMenu>
@@ -215,78 +236,22 @@
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
                                             <Border Grid.Row="0" Background="{Binding HeaderBrush}"
                                                     CornerRadius="6,6,0,0" Padding="9,5">
-                                                <Grid>
-                                                    <TextBlock Text="{Binding NodeType}" Foreground="White"
-                                                               FontSize="11" FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Id}" Foreground="#DFFFFFFF"
-                                                               HorizontalAlignment="Right" FontSize="10"/>
-                                                </Grid>
+                                                <TextBlock Text="{Binding Id, StringFormat=ID {0}}" Foreground="White"
+                                                           FontSize="11" FontWeight="SemiBold"/>
                                             </Border>
-                                            <StackPanel Grid.Row="1" Margin="8,6,8,2">
-                                                <TextBlock Text="NodeName" FontSize="10" Foreground="#FF909399"/>
-                                                <TextBox Text="{Binding NodeName, UpdateSourceTrigger=PropertyChanged}"/>
-                                            </StackPanel>
-                                            <StackPanel Grid.Row="2" Margin="8,2,8,8">
-                                                <StackPanel.Style>
-                                                    <Style TargetType="StackPanel">
-                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding CanSelectExeName}" Value="False">
-                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </StackPanel.Style>
-                                                <TextBlock Text="{Binding ExeNameLabel}" FontSize="10" Foreground="#FF606266"/>
-                                                <ComboBox IsEditable="True"
-                                                          Text="{Binding ExeName, UpdateSourceTrigger=PropertyChanged}"
-                                                          ItemsSource="{Binding DataContext.TaskTypes,
-                                                              RelativeSource={RelativeSource AncestorType=Window}}"
-                                                          ToolTip="从已加载 DLL 中选择，也可直接手写">
-                                                    <ComboBox.Style>
-                                                        <Style TargetType="ComboBox">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding NodeType}" Value="SubFlow">
-                                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </ComboBox.Style>
-                                                </ComboBox>
-                                                <ComboBox IsEditable="False"
-                                                          ItemsSource="{Binding DataContext.FlowIds,
-                                                              RelativeSource={RelativeSource AncestorType=Window}}"
-                                                          SelectedItem="{Binding ExeName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                          SelectionChanged="SubFlowSelector_SelectionChanged"
-                                                          DropDownClosed="SubFlowSelector_DropDownClosed"
-                                                          ToolTip="选择要调用的 Flow Id">
-                                                    <ComboBox.Style>
-                                                        <Style TargetType="ComboBox">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding NodeType}" Value="SubFlow">
-                                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </ComboBox.Style>
-                                                </ComboBox>
-                                            </StackPanel>
-                                            <Ellipse x:Name="InPort" Grid.RowSpan="3" Width="11" Height="11"
+                                            <TextBlock Grid.Row="1" Text="{Binding Name}" Margin="10,10"
+                                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <Ellipse x:Name="InPort" Grid.RowSpan="2" Width="11" Height="11"
                                                      Fill="#FF67C23A" Stroke="White" StrokeThickness="1.5"
                                                      HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                     Margin="0,-6,0,0" Panel.ZIndex="1" Cursor="Cross"
-                                                     Visibility="{Binding InPortVisibility}" ToolTip="输入端口"/>
-                                            <Ellipse x:Name="OutPort" Grid.RowSpan="3" Width="11" Height="11"
+                                                     Margin="0,-6,0,0" Panel.ZIndex="1" Cursor="Cross" ToolTip="输入端口"/>
+                                            <Ellipse x:Name="OutPort" Grid.RowSpan="2" Width="11" Height="11"
                                                      Fill="#FF409EFF" Stroke="White" StrokeThickness="1.5"
                                                      HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                                                     Margin="0,0,0,-6" Panel.ZIndex="1" Cursor="Cross"
-                                                     Visibility="{Binding OutPortVisibility}" ToolTip="按住拖出连线"/>
+                                                     Margin="0,0,0,-6" Panel.ZIndex="1" Cursor="Cross" ToolTip="按住拖出连线"/>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -303,38 +268,133 @@
                         </Canvas>
                     </Grid>
                 </ScrollViewer>
-
-                <!-- 底部属性栏 -->
-                <Border Grid.Row="1" Background="White" BorderBrush="#FFDCDFE6"
-                        BorderThickness="0,1,0,0" Padding="10,6">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
-                                DataContext="{Binding Editor.SelectedNode}">
-                        <TextBlock Text="选中节点：" VerticalAlignment="Center" Foreground="#FF909399"/>
-                        <TextBlock Text="Id" VerticalAlignment="Center" Margin="6,0,2,0"/>
-                        <TextBox Text="{Binding Id}" IsReadOnly="True" Width="110" Margin="0,0,10,0"/>
-                        <TextBlock Text="Type" VerticalAlignment="Center" Margin="0,0,2,0"/>
-                        <ComboBox Width="100" IsEditable="False" Margin="0,0,10,0"
-                                  ItemsSource="{Binding DataContext.Editor.NodeTypeOptions,
-                                      RelativeSource={RelativeSource AncestorType=Window}}"
-                                  SelectedItem="{Binding NodeType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  SelectionChanged="NodeTypeSelector_SelectionChanged">
-                            <ComboBox.Style>
-                                <Style TargetType="ComboBox">
-                                    <Setter Property="IsEnabled" Value="True"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding CanChangeNodeKind}" Value="False">
-                                            <Setter Property="IsEnabled" Value="False"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </ComboBox.Style>
-                        </ComboBox>
-                        <TextBlock Text="InputParameters" VerticalAlignment="Center" Margin="0,0,2,0"/>
-                        <TextBox Width="340" Text="{Binding InputParametersText, UpdateSourceTrigger=LostFocus}"
-                                 ToolTip="留空保存为 &quot;&quot;；填写 JSON 对象则原样保存"/>
-                    </StackPanel>
-                </Border>
             </Grid>
+
+            <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch" Background="#FFDCDFE6"/>
+
+            <!-- 右侧：节点/连线属性 -->
+            <Border Grid.Column="4" Background="#FFFAFAFA" Padding="14">
+                <Grid>
+                    <TextBlock Text="请选择节点或连线" Foreground="#FF909399"
+                               HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding DataContext.Editor.SelectedNode,
+                                                RelativeSource={RelativeSource AncestorType=Window}}" Value="{x:Null}"/>
+                                            <Condition Binding="{Binding DataContext.Editor.SelectedConnection,
+                                                RelativeSource={RelativeSource AncestorType=Window}}" Value="{x:Null}"/>
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  DataContext="{Binding Editor.SelectedNode}">
+                        <ScrollViewer.Style>
+                            <Style TargetType="ScrollViewer">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ScrollViewer.Style>
+                        <StackPanel>
+                            <TextBlock Text="节点属性" FontSize="16" FontWeight="Bold" Margin="0,0,0,14"/>
+
+                            <TextBlock Text="Id" Foreground="#FF606266"/>
+                            <TextBox Text="{Binding Id, Mode=OneWay}" IsReadOnly="True" Margin="0,4,0,10"/>
+
+                            <TextBlock Text="Name" Foreground="#FF606266"/>
+                            <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
+
+                            <TextBlock Text="StepType" Foreground="#FF606266"/>
+                            <ComboBox ItemsSource="{Binding DataContext.Editor.StepTypeOptions,
+                                              RelativeSource={RelativeSource AncestorType=Window}}"
+                                      SelectedItem="{Binding StepType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      SelectionChanged="StepTypeSelector_SelectionChanged"
+                                      Margin="0,4,0,10"/>
+
+                            <TextBlock Text="{Binding RunTypeLabel}" Foreground="#FF606266"/>
+                            <ComboBox IsEditable="True"
+                                      Text="{Binding RunType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      SelectionChanged="RunTypeSelector_SelectionChanged"
+                                      DropDownClosed="RunTypeSelector_DropDownClosed"
+                                      Margin="0,4,0,10">
+                                <ComboBox.Style>
+                                    <Style TargetType="ComboBox">
+                                        <Setter Property="ItemsSource" Value="{Binding DataContext.TaskTypes,
+                                            RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding StepType}" Value="{x:Static framework:FlowStepType.Flow}">
+                                                <Setter Property="ItemsSource" Value="{Binding DataContext.FlowTargets,
+                                                    RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ComboBox.Style>
+                            </ComboBox>
+
+                            <TextBlock Text="节点颜色" Foreground="#FF606266"/>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Background="{Binding HeaderBrush}" BorderBrush="#FFBFC4CC"
+                                        BorderThickness="1" CornerRadius="3" Margin="0,0,6,0"/>
+                                <TextBox Grid.Column="1" Text="{Binding ConfiguredColor, Mode=OneWay}"
+                                         IsReadOnly="True"/>
+                            </Grid>
+                            <TextBlock Text="颜色由 appsettings.json 的 NodeColors 配置" FontSize="11"
+                                       Foreground="#FF909399" Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  DataContext="{Binding Editor.SelectedConnection}">
+                        <ScrollViewer.Style>
+                            <Style TargetType="ScrollViewer">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ScrollViewer.Style>
+                        <StackPanel>
+                            <TextBlock Text="连线属性" FontSize="16" FontWeight="Bold" Margin="0,0,0,14"/>
+
+                            <TextBlock Text="FromStepId" Foreground="#FF606266"/>
+                            <TextBox Text="{Binding FromStepId, Mode=OneWay}" IsReadOnly="True" Margin="0,4,0,10"/>
+
+                            <TextBlock Text="NextStepId" Foreground="#FF606266"/>
+                            <TextBox Text="{Binding NextStepId, Mode=OneWay}" IsReadOnly="True" Margin="0,4,0,10"/>
+
+                            <TextBlock Text="NextStepConditions" Foreground="#FF606266"/>
+                            <ComboBox IsEditable="True"
+                                      ItemsSource="{Binding DataContext.Editor.ConditionOptions,
+                                          RelativeSource={RelativeSource AncestorType=Window}}"
+                                      Text="{Binding Conditions, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      SelectionChanged="ConnectionConditionSelector_SelectionChanged"
+                                      DropDownClosed="ConnectionConditionSelector_DropDownClosed"
+                                      Margin="0,4,0,10"/>
+
+                            <TextBlock Text="NextStepRunType" Foreground="#FF606266"/>
+                            <TextBox Text="{Binding RunType, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
         </Grid>
     </DockPanel>
 </Window>

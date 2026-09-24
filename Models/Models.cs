@@ -1,43 +1,114 @@
-﻿using System.Collections.Generic;
-using System.Text.Json.Serialization;
+using Framework;
+using Google.Protobuf;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
-namespace FlowEditor.Models
+namespace FlowEditor.Models;
+
+public sealed class FlowDef
 {
-    public class FlowFile
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public List<NodeDef> Nodes { get; set; } = [];
+    public List<ConnectionDef> Connections { get; set; } = [];
+}
+
+public sealed class FlowListDef
+{
+    public string Name { get; set; } = "";
+    public List<FlowDef> Flows { get; set; } = [];
+}
+
+public sealed class NodeDef
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string RunType { get; set; } = "";
+    public FlowStepType StepType { get; set; } = FlowStepType.Action;
+    public double? X { get; set; }
+    public double? Y { get; set; }
+}
+
+public sealed class ConnectionDef
+{
+    public int FromNodeId { get; set; }
+    public int ToNodeId { get; set; }
+    public string Conditions { get; set; } = "";
+    public string RunType { get; set; } = "";
+}
+
+public static class FlowListCodec
+{
+    public static FlowListDef Read(string path)
     {
-        [JsonPropertyName("flows")]
-        public List<FlowDef> Flows { get; set; } = new();
+        var source = Framework.FlowList.Parser.ParseFrom(File.ReadAllBytes(path));
+        return new FlowListDef
+        {
+            Name = source.Name,
+            Flows = source.Flows.Select(FromFlow).ToList()
+        };
     }
 
-    public class FlowDef
+    public static void Write(string path, string name, IEnumerable<FlowDef> flows)
     {
-        [JsonPropertyName("id")] public string Id { get; set; } = "";
-        [JsonPropertyName("name")] public string Name { get; set; } = "";
-        [JsonPropertyName("nodes")] public List<NodeDef> Nodes { get; set; } = new();
-        [JsonPropertyName("connections")] public List<ConnectionDef> Connections { get; set; } = new();
+        var result = new Framework.FlowList { Name = name };
+        result.Flows.AddRange(flows.Select(ToFlow));
+        File.WriteAllBytes(path, result.ToByteArray());
     }
 
-    public class NodeDef
+    public static Framework.Flow ToFlow(FlowDef source)
     {
-        [JsonPropertyName("id")] public string Id { get; set; } = "";
-        [JsonPropertyName("nodeName")] public string NodeName { get; set; } = "";
-        [JsonPropertyName("exeName")] public string ExeName { get; set; } = "";
-        [JsonPropertyName("nodeType")] public string NodeType { get; set; } = "";
-
-        // inputParameters 可能是 "" 也可能是对象，用 object 原样保留
-        [JsonPropertyName("inputParameters")] public object? InputParameters { get; set; }
-
-        // 画布布局信息：加载旧文件没有时自动排版；不需要可把这两行改成 [JsonIgnore]
-        [JsonPropertyName("x"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public double? X { get; set; }
-        [JsonPropertyName("y"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public double? Y { get; set; }
+        var result = new Framework.Flow { Id = source.Id, Name = source.Name };
+        foreach (var node in source.Nodes.OrderBy(n => n.Id))
+        {
+            var step = new FlowStep
+            {
+                Id = node.Id,
+                Name = node.Name,
+                RunType = node.RunType,
+                StepType = node.StepType,
+                StepLocation = new StepLocation
+                {
+                    X = (float)(node.X ?? 0),
+                    Y = (float)(node.Y ?? 0)
+                }
+            };
+            step.NextSteps.AddRange(source.Connections
+                .Where(c => c.FromNodeId == node.Id)
+                .Select(c => new NextStep
+                {
+                    NextStepId = c.ToNodeId,
+                    NextStepConditions = c.Conditions,
+                    NextStepRunType = c.RunType
+                }));
+            result.Steps.Add(step);
+        }
+        return result;
     }
 
-    public class ConnectionDef
+    private static FlowDef FromFlow(Framework.Flow source)
     {
-        [JsonPropertyName("fromNodeId")] public string FromNodeId { get; set; } = "";
-        [JsonPropertyName("toNodeId")] public string ToNodeId { get; set; } = "";
-        [JsonPropertyName("condition")] public string Condition { get; set; } = "";
+        var result = new FlowDef { Id = source.Id, Name = source.Name };
+        foreach (var step in source.Steps)
+        {
+            result.Nodes.Add(new NodeDef
+            {
+                Id = step.Id,
+                Name = step.Name,
+                RunType = step.RunType,
+                StepType = step.StepType,
+                X = step.StepLocation?.X,
+                Y = step.StepLocation?.Y
+            });
+            result.Connections.AddRange(step.NextSteps.Select(next => new ConnectionDef
+            {
+                FromNodeId = step.Id,
+                ToNodeId = next.NextStepId,
+                Conditions = next.NextStepConditions,
+                RunType = next.NextStepRunType
+            }));
+        }
+        return result;
     }
 }

@@ -1,4 +1,6 @@
 ﻿using FlowEditor.ViewModels;
+using FlowEditor.Models;
+using Framework;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -65,6 +67,13 @@ namespace FlowEditor
                 || FindAncestor<ComboBoxItem>(src) != null
                 || FindAncestor<ButtonBase>(src) != null)
                 return; // 在编辑文本，不进入拖拽
+
+            if (e.ClickCount == 2 && node.StepType == FlowStepType.Flow)
+            {
+                NavigateToFlow(node);
+                e.Handled = true;
+                return;
+            }
 
             bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
             if (ctrl)
@@ -213,22 +222,61 @@ namespace FlowEditor
         private void EditorArea_ContextMenuOpening(object sender, ContextMenuEventArgs e)
             => _contextMenuPosition = Mouse.GetPosition(EditorArea);
 
-        private void NodeTypeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void Connection_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (sender is ComboBox { DataContext: NodeViewModel node, SelectedItem: string nodeType })
-                node.NodeType = nodeType;
+            if (sender is FrameworkElement { DataContext: ConnectionViewModel connection })
+            {
+                _vm.Editor?.SelectConnection(connection);
+                e.Handled = true;
+            }
         }
 
-        private void SubFlowSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
-            => ApplySubFlowSelection(sender);
-
-        private void SubFlowSelector_DropDownClosed(object? sender, EventArgs e)
-            => ApplySubFlowSelection(sender);
-
-        private static void ApplySubFlowSelection(object? sender)
+        private void StepTypeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (sender is ComboBox { DataContext: NodeViewModel node, SelectedItem: string flowId })
-                node.ExeName = flowId;
+            if (sender is ComboBox { DataContext: NodeViewModel node, SelectedItem: FlowStepType stepType })
+                node.StepType = stepType;
+        }
+
+        private void RunTypeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+            ApplyRunTypeSelection(sender);
+
+        private void RunTypeSelector_DropDownClosed(object? sender, EventArgs e) =>
+            ApplyRunTypeSelection(sender);
+
+        private static void ApplyRunTypeSelection(object? sender)
+        {
+            if (sender is not ComboBox { DataContext: NodeViewModel node } selector) return;
+            node.RunType = selector.SelectedItem as string ?? selector.Text;
+        }
+
+        private void ConnectionConditionSelector_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+            ApplyConnectionCondition(sender);
+
+        private void ConnectionConditionSelector_DropDownClosed(object? sender, EventArgs e) =>
+            ApplyConnectionCondition(sender);
+
+        private static void ApplyConnectionCondition(object? sender)
+        {
+            if (sender is not ComboBox { DataContext: ConnectionViewModel connection } selector) return;
+            connection.Conditions = selector.SelectedItem as string ?? selector.Text;
+        }
+
+        private void RenameFlowMenu_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement { DataContext: FlowDef flow }) _vm.RenameFlow(flow);
+        }
+
+        private void DeleteFlowMenu_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement { DataContext: FlowDef flow }) _vm.RemoveFlow(flow);
+        }
+
+        private void NavigateToFlow(NodeViewModel node)
+        {
+            if (node.StepType != FlowStepType.Flow) return;
+            if (!_vm.NavigateToFlow(node))
+                MessageBox.Show($"未找到目标 Flow：{node.RunType}", "跳转失败",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         // ===== 其余（与上一版相同） =====
@@ -241,11 +289,11 @@ namespace FlowEditor
             }
         }
 
-        private void AddFuncNode_Click(object sender, RoutedEventArgs e) => AddNode("Func");
+        private void AddActionNode_Click(object sender, RoutedEventArgs e) => AddNode(FlowStepType.Action);
 
-        private void AddSubFlowNode_Click(object sender, RoutedEventArgs e) => AddNode("SubFlow");
+        private void AddFlowStepNode_Click(object sender, RoutedEventArgs e) => AddNode(FlowStepType.Flow);
 
-        private void AddNode(string nodeType)
+        private void AddNode(FlowStepType stepType)
         {
             if (_vm.Editor == null)
             {
@@ -256,7 +304,7 @@ namespace FlowEditor
             var position = _contextMenuPosition;
             if (position.X < 0 || position.Y < 0 || position.X > EditorArea.ActualWidth || position.Y > EditorArea.ActualHeight)
                 position = new Point(CanvasScroll.HorizontalOffset + 160, CanvasScroll.VerticalOffset + 120);
-            _vm.Editor.AddNode(position, nodeType);
+            _vm.Editor.AddNode(position, stepType);
         }
 
         private void DeleteNodeMenu_Click(object sender, RoutedEventArgs e)

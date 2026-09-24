@@ -1,4 +1,7 @@
+using FlowEditor.Dialogs;
 using FlowEditor.ViewModels;
+using FlowEditor.Models;
+using Framework;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -26,47 +29,63 @@ internal static class UiSmokeTest
             window.ShowActivated = false;
             var main = (MainViewModel)window.DataContext;
             var editor = main.Editor ?? throw new InvalidOperationException("Active flow editor was not created.");
-            var node = editor.Nodes.Single(n => n.Id == "Func_1");
+            var node = editor.Nodes.Single(n => n.Id == 2);
 
             window.Show();
             RefreshUi(window);
 
-            var nodeTypeSelector = FindVisualChildren<ComboBox>(window).Single(c =>
-                ReferenceEquals(c.DataContext, node) && ReferenceEquals(c.ItemsSource, editor.NodeTypeOptions));
-            BindingOperations.ClearBinding(nodeTypeSelector, Selector.SelectedItemProperty);
-            nodeTypeSelector.SelectedItem = null;
-            nodeTypeSelector.IsDropDownOpen = true;
-            nodeTypeSelector.SelectedItem = "SubFlow";
-            nodeTypeSelector.IsDropDownOpen = false;
+            var nameDialog = new FlowNameDialog("新建流程", "",
+                name => string.IsNullOrWhiteSpace(name) ? "流程名称不能为空。" : null);
+            Assert(!nameDialog.ConfirmButton.IsEnabled, "An empty Flow name can be confirmed.");
+            nameDialog.FlowNameBox.Text = "CheckedFlow";
+            Assert(nameDialog.ConfirmButton.IsEnabled, "A valid Flow name cannot be confirmed.");
+            nameDialog.Close();
+
+            var flowItem = FindVisualChildren<Border>(window).First(b =>
+                b.DataContext is FlowDef && b.ContextMenu != null);
+            Assert(flowItem.ContextMenu!.Items.Count == 2, "Flow context menu is missing rename or delete.");
+
+            var connection = editor.Connections.Single();
+            editor.SelectConnection(connection);
+            RefreshUi(window);
+            var conditionSelector = FindVisualChildren<ComboBox>(window).Single(c =>
+                ReferenceEquals(c.DataContext, connection) && ReferenceEquals(c.ItemsSource, editor.ConditionOptions));
+            conditionSelector.SelectedItem = "OK";
+            RefreshUi(window);
+            Assert(connection.Conditions == "OK", "The connection inspector did not update Conditions.");
+            editor.SelectOnly(node);
             RefreshUi(window);
 
-            Assert(node.NodeType == "SubFlow", "Selecting SubFlow did not update NodeType.");
+            var stepTypeSelector = FindVisualChildren<ComboBox>(window).Single(c =>
+                ReferenceEquals(c.DataContext, node) && ReferenceEquals(c.ItemsSource, editor.StepTypeOptions));
+            BindingOperations.ClearBinding(stepTypeSelector, Selector.SelectedItemProperty);
+            stepTypeSelector.SelectedItem = FlowStepType.Flow;
+            RefreshUi(window);
+
+            Assert(node.StepType == FlowStepType.Flow, "Selecting FLOW did not update StepType.");
             Assert(node.HeaderBrush is SolidColorBrush { Color: var color }
                    && color == Color.FromRgb(0x7C, 0x3A, 0xED),
-                "Selecting SubFlow did not apply the purple node color.");
+                "Selecting FLOW did not apply the purple node color.");
 
             var targetFlowSelector = FindVisualChildren<ComboBox>(window).Single(c =>
-                ReferenceEquals(c.DataContext, node) && ReferenceEquals(c.ItemsSource, main.FlowIds));
-            BindingOperations.ClearBinding(targetFlowSelector, Selector.SelectedItemProperty);
-            targetFlowSelector.SelectedItem = null;
-            targetFlowSelector.IsDropDownOpen = true;
-            targetFlowSelector.SelectedItem = "Flow_1";
-            targetFlowSelector.IsDropDownOpen = false;
+                ReferenceEquals(c.DataContext, node) && ReferenceEquals(c.ItemsSource, main.FlowTargets));
+            targetFlowSelector.Text = "Flow_1";
             RefreshUi(window);
+            Assert(node.RunType == "Flow_1", "Selecting the target Flow did not update RunType.");
+            Assert(main.NavigateToFlow(node), "FLOW navigation did not find the target page.");
+            Assert(main.SelectedFlow?.Name == "Flow_1", "FLOW navigation selected the wrong page.");
 
-            Assert(node.ExeName == "Flow_1", "Selecting the target Flow did not update ExeName.");
-            Assert(targetFlowSelector.Text == "Flow_1", "The target Flow selection is not visible.");
-
-            node.ExeName = "";
-            targetFlowSelector.IsDropDownOpen = true;
-            targetFlowSelector.IsDropDownOpen = false;
-            RefreshUi(window);
-            Assert(node.ExeName == "Flow_1", "Closing the target Flow selector did not commit ExeName.");
+            var firstEditor = main.Editor ?? throw new InvalidOperationException("Target editor was not created.");
+            firstEditor.AddNode(new Point(400, 260));
+            firstEditor.AddNode(new Point(620, 260));
+            firstEditor.RemoveNode(firstEditor.Nodes[1]);
+            Assert(firstEditor.Nodes.Select(n => n.Id).SequenceEqual([1, 2]),
+                "Deleting a middle node did not produce continuous IDs.");
             return 0;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            File.WriteAllText(Path.Combine(Path.GetTempPath(), "FlowEditor.UiSmokeTest.failure.txt"), ex.ToString());
+            File.WriteAllText(Path.Combine(Path.GetTempPath(), "FlowEditor.UiSmokeTest.failure.txt"), exception.ToString());
             return 1;
         }
         finally
@@ -79,9 +98,13 @@ internal static class UiSmokeTest
     {
         var window = new MainWindow();
         var main = (MainViewModel)window.DataContext;
-        main.AddFlowCommand.Execute(null);
-        main.AddFlowCommand.Execute(null);
-        main.Editor?.AddNode(new Point(400, 260), "Func");
+        main.CreateFlow("Flow_1");
+        main.CreateFlow("Flow_2");
+        if (main.Editor is { } editor)
+        {
+            var node = editor.AddNode(new Point(400, 260));
+            editor.AddConnection(editor.Nodes[0], node);
+        }
         return window;
     }
 
@@ -93,9 +116,9 @@ internal static class UiSmokeTest
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
     {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
         {
-            var child = VisualTreeHelper.GetChild(parent, i);
+            var child = VisualTreeHelper.GetChild(parent, index);
             if (child is T match) yield return match;
             foreach (var descendant in FindVisualChildren<T>(child)) yield return descendant;
         }

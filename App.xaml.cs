@@ -15,6 +15,11 @@ namespace FlowEditor
                 Shutdown(UiSmokeTest.Run());
                 return;
             }
+            if (e.Args.Contains("--model-smoke-test", StringComparer.OrdinalIgnoreCase))
+            {
+                Shutdown(ModelSmokeTest.Run());
+                return;
+            }
             new MainWindow().Show();
         }
     }

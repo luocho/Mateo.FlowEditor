@@ -1,108 +1,150 @@
-﻿using System.Collections.Generic;
+using Framework;
+using System;
+using System.Collections.Generic;
 using System.Linq;
 
-namespace FlowEditor.ViewModels
+namespace FlowEditor.ViewModels;
+
+public sealed record NodeSnapshot(
+    Guid Key,
+    string Name,
+    string RunType,
+    FlowStepType StepType,
+    double X,
+    double Y,
+    int Index)
 {
-    // ===== 快照 =====
-    public record NodeSnapshot(string Id, string NodeName, string ExeName, string NodeType,
-                               string InputParameters, double X, double Y, int Index)
-    {
-        public static NodeSnapshot Of(NodeViewModel n, int index) =>
-            new(n.Id, n.NodeName, n.ExeName, n.NodeType, n.InputParametersText, n.X, n.Y, index);
+    public static NodeSnapshot Of(NodeViewModel node, int index) =>
+        new(node.Key, node.Name, node.RunType, node.StepType, node.X, node.Y, index);
 
-        public NodeViewModel ToViewModel() => new()
-        {
-            Id = Id,
-            NodeName = NodeName,
-            ExeName = ExeName,
-            NodeType = NodeType,
-            InputParametersText = InputParameters,
-            X = X,
-            Y = Y
-        };
+    public NodeViewModel ToViewModel() => new()
+    {
+        Key = Key,
+        Name = Name,
+        RunType = RunType,
+        StepType = StepType,
+        X = X,
+        Y = Y
+    };
+}
+
+public sealed record ConnSnapshot(
+    Guid Key,
+    Guid SourceKey,
+    Guid TargetKey,
+    string Conditions,
+    string RunType)
+{
+    public static ConnSnapshot Of(ConnectionViewModel connection) => new(
+        connection.Key,
+        connection.Source.Key,
+        connection.Target.Key,
+        connection.Conditions,
+        connection.RunType);
+}
+
+public sealed record NodeMove(Guid Key, double OldX, double OldY, double NewX, double NewY);
+
+public abstract class EditAction
+{
+    public abstract string Name { get; }
+    internal abstract void Undo(FlowEditorViewModel viewModel);
+    internal abstract void Redo(FlowEditorViewModel viewModel);
+}
+
+public sealed class AddNodeAction(NodeSnapshot node) : EditAction
+{
+    public override string Name => $"添加节点 {node.Index + 1}";
+
+    internal override void Undo(FlowEditorViewModel viewModel)
+    {
+        if (viewModel.FindNode(node.Key) is { } current)
+            viewModel.RemoveNodesCore([current]);
     }
 
-    public record ConnSnapshot(string FromId, string ToId, string Condition);
-    public record NodeMove(string Id, double OldX, double OldY, double NewX, double NewY);
+    internal override void Redo(FlowEditorViewModel viewModel) =>
+        viewModel.InsertNodeCore(node.ToViewModel(), node.Index);
+}
 
-    // ===== 命令基类 =====
-    public abstract class EditAction
+public sealed class DeleteNodesAction(
+    List<NodeSnapshot> nodes,
+    List<ConnSnapshot> connections) : EditAction
+{
+    public override string Name => nodes.Count == 1
+        ? $"删除节点 {nodes[0].Index + 1}"
+        : $"删除 {nodes.Count} 个节点";
+
+    internal override void Undo(FlowEditorViewModel viewModel)
     {
-        public abstract string Name { get; }
-        internal abstract void Undo(FlowEditorViewModel vm);
-        internal abstract void Redo(FlowEditorViewModel vm);
+        foreach (var node in nodes.OrderBy(n => n.Index))
+            viewModel.InsertNodeCore(node.ToViewModel(), node.Index);
+        foreach (var connection in connections)
+            viewModel.InsertConnectionCore(
+                connection.SourceKey,
+                connection.TargetKey,
+                connection.Conditions,
+                connection.RunType,
+                connection.Key);
     }
 
-    public class AddNodeAction : EditAction
+    internal override void Redo(FlowEditorViewModel viewModel) =>
+        viewModel.RemoveNodesCore(nodes
+            .Select(n => viewModel.FindNode(n.Key))
+            .Where(n => n != null)
+            .Cast<NodeViewModel>());
+}
+
+public sealed class AddConnectionAction(ConnSnapshot connection) : EditAction
+{
+    public override string Name => "添加连线";
+
+    internal override void Undo(FlowEditorViewModel viewModel)
     {
-        private readonly NodeSnapshot _n;
-        public AddNodeAction(NodeSnapshot n) { _n = n; }
-        public override string Name => $"添加节点 {_n.Id}";
-        internal override void Undo(FlowEditorViewModel vm)
-        {
-            var node = vm.FindNode(_n.Id);
-            if (node != null) vm.RemoveNodesCore(new[] { node });
-        }
-        internal override void Redo(FlowEditorViewModel vm) => vm.InsertNodeCore(_n.ToViewModel(), _n.Index);
+        if (viewModel.Connections.FirstOrDefault(c => c.Key == connection.Key) is { } current)
+            viewModel.RemoveConnectionCore(current);
     }
 
-    public class DeleteNodesAction : EditAction
+    internal override void Redo(FlowEditorViewModel viewModel) =>
+        viewModel.InsertConnectionCore(
+            connection.SourceKey,
+            connection.TargetKey,
+            connection.Conditions,
+            connection.RunType,
+            connection.Key);
+}
+
+public sealed class DeleteConnectionAction(ConnSnapshot connection) : EditAction
+{
+    public override string Name => "删除连线";
+
+    internal override void Undo(FlowEditorViewModel viewModel) =>
+        viewModel.InsertConnectionCore(
+            connection.SourceKey,
+            connection.TargetKey,
+            connection.Conditions,
+            connection.RunType,
+            connection.Key);
+
+    internal override void Redo(FlowEditorViewModel viewModel)
     {
-        private readonly List<NodeSnapshot> _nodes;
-        private readonly List<ConnSnapshot> _conns;
-        public DeleteNodesAction(List<NodeSnapshot> nodes, List<ConnSnapshot> conns) { _nodes = nodes; _conns = conns; }
-        public override string Name => _nodes.Count == 1 ? $"删除节点 {_nodes[0].Id}" : $"删除 {_nodes.Count} 个节点";
-        internal override void Undo(FlowEditorViewModel vm)
-        {
-            foreach (var s in _nodes.OrderBy(x => x.Index))
-                vm.InsertNodeCore(s.ToViewModel(), s.Index);
-            foreach (var c in _conns)
-                vm.InsertConnectionCore(c.FromId, c.ToId, c.Condition);
-        }
-        internal override void Redo(FlowEditorViewModel vm)
-        {
-            var nodes = _nodes.Select(s => vm.FindNode(s.Id))
-                              .Where(n => n != null).Cast<NodeViewModel>().ToList();
-            vm.RemoveNodesCore(nodes);
-        }
+        if (viewModel.Connections.FirstOrDefault(c => c.Key == connection.Key) is { } current)
+            viewModel.RemoveConnectionCore(current);
+    }
+}
+
+public sealed class MoveNodesAction(List<NodeMove> moves) : EditAction
+{
+    public override string Name => moves.Count == 1 ? "移动节点" : $"移动 {moves.Count} 个节点";
+
+    internal override void Undo(FlowEditorViewModel viewModel)
+    {
+        foreach (var move in moves)
+            viewModel.SetNodePosition(move.Key, move.OldX, move.OldY);
     }
 
-    public class AddConnectionAction : EditAction
+    internal override void Redo(FlowEditorViewModel viewModel)
     {
-        private readonly ConnSnapshot _c;
-        public AddConnectionAction(ConnSnapshot c) { _c = c; }
-        public override string Name => $"添加连线 {_c.FromId}→{_c.ToId}";
-        internal override void Undo(FlowEditorViewModel vm)
-        {
-            var c = vm.Connections.FirstOrDefault(x => x.Source.Id == _c.FromId
-                && x.Target.Id == _c.ToId && x.Condition == _c.Condition);
-            if (c != null) vm.RemoveConnectionCore(c);
-        }
-        internal override void Redo(FlowEditorViewModel vm) => vm.InsertConnectionCore(_c.FromId, _c.ToId, _c.Condition);
-    }
-
-    public class DeleteConnectionAction : EditAction
-    {
-        private readonly ConnSnapshot _c;
-        public DeleteConnectionAction(ConnSnapshot c) { _c = c; }
-        public override string Name => $"删除连线 {_c.FromId}→{_c.ToId}";
-        internal override void Undo(FlowEditorViewModel vm) => vm.InsertConnectionCore(_c.FromId, _c.ToId, _c.Condition);
-        internal override void Redo(FlowEditorViewModel vm)
-        {
-            var c = vm.Connections.FirstOrDefault(x => x.Source.Id == _c.FromId
-                && x.Target.Id == _c.ToId && x.Condition == _c.Condition);
-            if (c != null) vm.RemoveConnectionCore(c);
-        }
-    }
-
-    public class MoveNodesAction : EditAction
-    {
-        private readonly List<NodeMove> _moves;
-        public MoveNodesAction(List<NodeMove> moves) { _moves = moves; }
-        public override string Name => _moves.Count == 1 ? $"移动节点 {_moves[0].Id}" : $"移动 {_moves.Count} 个节点";
-        internal override void Undo(FlowEditorViewModel vm)
-        { foreach (var m in _moves) vm.SetNodePosition(m.Id, m.OldX, m.OldY); }
-        internal override void Redo(FlowEditorViewModel vm)
-        { foreach (var m in _moves) vm.SetNodePosition(m.Id, m.NewX, m.NewY); }
+        foreach (var move in moves)
+            viewModel.SetNodePosition(move.Key, move.NewX, move.NewY);
     }
 }
